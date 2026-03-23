@@ -1,57 +1,60 @@
 <!DOCTYPE html>
-<html lang="zh-TW">
+<html>
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>專業 3D 魔術方塊計時器</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>3D 魔術方塊競賽系統</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
     <style>
-        :root { --primary: #00e676; --bg: #111; }
-        body { margin: 0; background: var(--bg); color: white; font-family: sans-serif; overflow: hidden; touch-action: none; }
-        .overlay { position: absolute; z-index: 10; width: 100%; height: 100%; pointer-events: none; }
-        .interactive { pointer-events: auto; }
-        .card { background: rgba(20,20,20,0.95); padding: 20px; border-radius: 15px; position: absolute; border: 1px solid #444; }
-        #login-screen { top: 50%; left: 50%; transform: translate(-50%, -50%); width: 280px; text-align: center; }
-        #timer-screen { top: 20px; left: 20px; width: 240px; }
-        #timer { font-size: 48px; font-family: monospace; color: var(--primary); margin: 10px 0; }
-        #scramble { color: #ffeb3b; font-size: 16px; font-weight: bold; margin-bottom: 10px; min-height: 3em; }
-        input { width: 85%; padding: 10px; margin: 10px 0; border-radius: 5px; border: none; background: #333; color: white; }
-        button { background: var(--primary); border: none; padding: 12px; border-radius: 8px; font-weight: bold; cursor: pointer; width: 100%; }
-        #canvas-container { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 1; }
+        body { margin: 0; background: #111; color: white; font-family: sans-serif; overflow: hidden; }
+        .ui { position: absolute; z-index: 100; pointer-events: none; width: 100%; height: 100%; }
+        .panel { background: rgba(0,0,0,0.8); padding: 15px; border-radius: 10px; pointer-events: auto; }
+        #timer-box { top: 10px; left: 10px; position: absolute; }
+        #login-box { top: 50%; left: 50%; transform: translate(-50%, -50%); position: absolute; width: 250px; text-align: center; }
+        #timer { font-size: 40px; color: #00e676; font-family: monospace; }
+        input { width: 80%; padding: 8px; margin: 5px; border-radius: 4px; border: none; }
+        button { background: #00e676; border: none; padding: 10px 20px; border-radius: 5px; font-weight: bold; cursor: pointer; margin-top: 10px; }
+        #canvas-container { width: 100vw; height: 100vh; }
     </style>
 </head>
 <body>
 
 <div id="canvas-container"></div>
-<div class="overlay">
-    <div id="login-screen" class="card interactive">
-        <h2>Cube Master Pro</h2>
-        <input type="text" id="className" placeholder="班級">
+
+<div class="ui">
+    <div id="login-box" class="panel">
+        <h2>參賽登錄</h2>
+        <input type="text" id="className" placeholder="班級 (例: 301)">
         <input type="text" id="name" placeholder="姓名">
-        <button onclick="startApp()">開始挑戰</button>
+        <button onclick="startApp()">進入賽場</button>
     </div>
 
-    <div id="timer-screen" class="card interactive" style="display:none;">
-        <div id="scramble">打亂中...</div>
+    <div id="timer-box" class="panel" style="display:none;">
+        <div id="scramble">等待打亂...</div>
         <div id="timer">0.000</div>
-        <button id="upload-btn" onclick="uploadScore()" disabled>上傳成績</button>
-        <button onclick="resetChallenge()" style="background:#444; color:white; margin-top:10px; border:none; padding:8px; width:100%; border-radius:5px;">下一組打亂</button>
+        <button id="upload-btn" onclick="uploadData()" disabled>上傳成績</button>
+        <button onclick="scrambleCube()" style="background:#444; color:white;">重新打亂</button>
     </div>
 </div>
 
 <script>
     const gasUrl = "你的_GAS_網址"; 
-    let scene, camera, renderer, cubes = [], running = false, startTime, lastTime = 0;
+    let scene, camera, renderer, controls, cubes = [];
+    let startTime, timerInterval, running = false, lastTime = 0;
 
-    // 1. 初始化 3D 舞台
     function init3D() {
         scene = new THREE.Scene();
-        camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
-        renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        camera = new THREE.PerspectiveCamera(45, window.innerWidth/window.innerHeight, 0.1, 1000);
+        renderer = new THREE.WebGLRenderer({ antialias: true });
         renderer.setSize(window.innerWidth, window.innerHeight);
         document.getElementById('canvas-container').appendChild(renderer.domElement);
 
-        const colors = [0xffffff, 0xffff00, 0xff0000, 0xffa500, 0x0000ff, 0x00ff00]; // 右左、上下、前後
+        // 建立 3D 軌道控制 (支援滑鼠、平板撥動視角)
+        controls = new THREE.OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+
+        const colors = [0xffffff, 0xffff00, 0xff0000, 0xffa500, 0x0000ff, 0x00ff00];
         const geom = new THREE.BoxGeometry(0.95, 0.95, 0.95);
 
         for(let x=-1; x<=1; x++) {
@@ -65,105 +68,89 @@
                 }
             }
         }
-        camera.position.set(4, 4, 6);
-        camera.lookAt(0,0,0);
+        camera.position.set(5, 5, 5);
         animate();
     }
 
     function animate() {
         requestAnimationFrame(animate);
-        if(!running) { scene.rotation.y += 0.005; }
+        controls.update();
         renderer.render(scene, camera);
     }
 
-    // 2. 精確旋轉邏輯：根據 WCA 指令旋轉層面
-    function makeMove(move) {
-        const face = move[0]; // R, L, U, D, F, B
-        const isClockwise = !move.includes("'");
-        const isDouble = move.includes("2");
-        const angle = (isDouble ? Math.PI : Math.PI / 2) * (isClockwise ? -1 : 1);
-
-        // 建立臨時旋轉組
-        const group = new THREE.Group();
-        scene.add(group);
-
-        const threshold = 0.1;
-        const toRotate = cubes.filter(c => {
-            if(face === 'R') return c.position.x > threshold;
-            if(face === 'L') return c.position.x < -threshold;
-            if(face === 'U') return c.position.y > threshold;
-            if(face === 'D') return c.position.y < -threshold;
-            if(face === 'F') return c.position.z > threshold;
-            if(face === 'B') return c.position.z < -threshold;
+    // 打亂邏輯：視覺上隨機分配顏色，模仿打亂狀態
+    function scrambleCube() {
+        const colors = [0xffffff, 0xffff00, 0xff0000, 0xffa500, 0x0000ff, 0x00ff00];
+        cubes.forEach(c => {
+            c.material.forEach(m => m.color.setHex(colors[Math.floor(Math.random()*6)]));
+            c.rotation.set(Math.random()*Math.PI, Math.random()*Math.PI, Math.random()*Math.PI);
         });
-
-        toRotate.forEach(c => group.add(c));
-
-        // 執行旋轉軸
-        if(face === 'R' || face === 'L') group.rotation.x = angle;
-        if(face === 'U' || face === 'D') group.rotation.y = angle;
-        if(face === 'F' || face === 'B') group.rotation.z = angle;
-
-        // 旋轉完畢後釋放回場景並更新座標（重要！）
-        group.updateMatrixWorld();
-        toRotate.forEach(c => {
-            c.applyMatrix4(group.matrixWorld);
-            scene.add(c);
-        });
-        scene.remove(group);
+        document.getElementById('scramble').innerText = "方塊已打亂，請準備！";
+        resetTimerUI();
     }
 
-    // 3. 生成與執行打亂
-    function startApp() {
-        if(!document.getElementById('className').value || !document.getElementById('name').value) return alert("請輸入資料");
-        document.getElementById('login-screen').style.display = 'none';
-        document.getElementById('timer-screen').style.display = 'block';
-        init3D();
-        resetChallenge();
-        initControls();
-    }
-
-    async function resetChallenge() {
-        // 重置位置
+    // 變回同一顏色 (重置)
+    function resetToSolid() {
+        const colors = [0xffffff, 0xffff00, 0xff0000, 0xffa500, 0x0000ff, 0x00ff00];
         cubes.forEach((c, i) => {
-            c.rotation.set(0,0,0);
-            c.position.set((i%3)-1, Math.floor((i/3)%3)-1, Math.floor(i/9)-1);
+            c.rotation.set(0, 0, 0);
+            c.material.forEach((m, mi) => m.color.setHex(colors[mi]));
         });
-        
-        const moves = ["U", "D", "L", "R", "F", "B"];
-        const mods = ["", "'", "2"];
-        let s = [];
-        for(let i=0; i<15; i++) {
-            let m = moves[Math.floor(Math.random()*6)] + mods[Math.floor(Math.random()*3)];
-            s.push(m);
-            makeMove(m); // 即時在 3D 空間中執行每一動
-        }
-        document.getElementById('scramble').innerText = s.join(" ");
-        document.getElementById('timer').innerText = "0.000";
     }
 
-    // 4. 計時邏輯 (與前版相同)
-    function initControls() {
-        window.addEventListener('keyup', (e) => { if(e.code === "Space") toggleTimer(); });
-        document.getElementById('canvas-container').addEventListener('mousedown', toggleTimer);
+    function startApp() {
+        if(!document.getElementById('className').value) return;
+        document.getElementById('login-box').style.display = 'none';
+        document.getElementById('timer-box').style.display = 'block';
+        init3D();
+        scrambleCube();
+        
+        // 鍵盤空白鍵監聽
+        window.addEventListener('keydown', (e) => {
+            if(e.code === "Space") {
+                e.preventDefault();
+                toggleTimer();
+            }
+        });
+        // 點擊螢幕計時 (平板友善)
+        renderer.domElement.addEventListener('touchstart', (e) => {
+            toggleTimer();
+        });
     }
 
     function toggleTimer() {
         if(!running) {
             running = true; startTime = Date.now();
-            document.getElementById('timer').style.color = "var(--primary)";
+            document.getElementById('timer').style.color = "#ff5252";
             timerInterval = setInterval(() => {
                 lastTime = ((Date.now() - startTime)/1000).toFixed(3);
                 document.getElementById('timer').innerText = lastTime;
             }, 10);
+            document.getElementById('upload-btn').disabled = true;
         } else {
             running = false; clearInterval(timerInterval);
+            document.getElementById('timer').style.color = "#00e676";
             document.getElementById('upload-btn').disabled = false;
         }
     }
 
-    async function uploadScore() {
-        // ... (保持先前的 uploadScore 程式碼)
+    function resetTimerUI() {
+        document.getElementById('timer').innerText = "0.000";
+        document.getElementById('upload-btn').disabled = true;
+    }
+
+    async function uploadData() {
+        const btn = document.getElementById('upload-btn');
+        btn.innerText = "上傳中...";
+        const d = {
+            className: document.getElementById('className').value,
+            name: document.getElementById('name').value,
+            time: lastTime
+        };
+        await fetch(gasUrl, { method: "POST", body: JSON.stringify(d) });
+        alert("上傳成功！方塊將重置。");
+        btn.innerText = "上傳成績";
+        resetToSolid(); // 結束後變回整齊顏色
     }
 </script>
 </body>
